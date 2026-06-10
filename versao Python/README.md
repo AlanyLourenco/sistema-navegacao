@@ -8,10 +8,13 @@
 ## Como executar
 
 ```bash
-# Passando o arquivo .poly direto:
+# Passando um arquivo suportado direto:
 python main.py Campus2UFG_Regiao.poly
+python main.py mapa.osm
+python main.py mapa.xml
+python main.py mapa.txt
 
-# Ou sem argumento (busca .poly na pasta atual):
+# Ou sem argumento (busca um mapa suportado na pasta atual):
 python main.py
 ```
 
@@ -31,9 +34,10 @@ python main.py
 | `A` | Adicionar aresta não-dirigida (clique em 2 vértices) |
 | `U` | Adicionar aresta dirigida/mão única |
 | `X` | Deletar vértice (clique nele) |
+| `Z` | Deletar aresta (clique na aresta) |
 | `N` | Mostrar/ocultar IDs dos vértices |
 | `W` | Mostrar/ocultar pesos das arestas |
-| `L` | Carregar arquivo .poly |
+| `L` | Importar mapa (.poly, .txt, .osm, .xml) |
 | `I` | Salvar imagem do mapa (screenshot) |
 | `Q` | Sair |
 | Scroll do mouse | Zoom in/out |
@@ -42,7 +46,23 @@ python main.py
 
 ## Arquivos de entrada suportados
 - `.poly` — formato gerado pelo `LeArqOSM_e_GeraArqPoly.c`
-- Estrutura: `num_vertices dim 0 1` → linhas `id x y` → `num_arestas 1` → linhas `id src dst dirigida`
+- `.osm` / `.xml` / `.xlml` — leitura direta de OSM/XML com nós e vias `highway`
+- `.txt` / `.csv` / `.tsv` / `.dat` — formato estruturado com seções `VERTICES` e `ARESTAS`
+
+Exemplo de TXT estruturado:
+
+```txt
+VERTICES
+0 100.0 120.0 Rua_A
+1 180.0 130.0 Rua_B
+2 220.0 160.0 Av_C
+
+ARESTAS
+0 1 0
+1 2 1
+```
+
+Observação: em TXT, o terceiro campo da aresta é opcional e indica direção quando vale `1`, `d`, `dir`, `directed`, `oneway` ou `->`.
 
 ## Algoritmo
 Dijkstra com **Min-Heap** (módulo `heapq` do Python) — complexidade O((V+E) lg V).
@@ -50,7 +70,7 @@ Suporta grafos com milhares de vértices (Campus UFG: 10.000 V, 11.526 E).
 
 ## Requisitos satisfeitos
 - RF01: Importa .poly com coordenadas reais
-- RF02: Exibe IDs e pesos (teclas N e W)
+- RF02: Enumera os vértices e exibe os pesos das arestas (teclas N e W)
 - RF03: Seleção de origem (verde) e destino (vermelho), com desfazer via R
 - RF04: Caminho mínimo destacado em ciano
 - RF05: Adição/remoção de vértices e arestas por clique

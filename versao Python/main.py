@@ -6,11 +6,12 @@ import math
 import os
 import sys
 import time
+import ctypes
 
 import pygame
 
 from algorithms import dijkstra
-from core import carregar_poly
+from core import carregar_grafo
 from gui import (
     ALTURA,
     COR_ARESTA,
@@ -65,6 +66,7 @@ class App:
         self.tempo_ms = 0.0
 
         self.MODOS = ['origem', 'destino', 'add_vertice', 'add_aresta', 'add_aresta_dir', 'deletar', 'pan']
+        self.MODOS = ['origem', 'destino', 'add_vertice', 'add_aresta', 'add_aresta_dir', 'deletar', 'deletar_aresta', 'pan']
         self.modo = 'origem'
         self.add_aresta_primeiro = -1
 
@@ -79,6 +81,7 @@ class App:
 
         self.log_msgs = []
         self.arq_carregado = ''
+        self.ultimo_grafo_surf = None
 
         self._criar_botoes()
 
@@ -101,7 +104,7 @@ class App:
             nonlocal y
             y += 4
 
-        B('ler_poly', '[L] Ler arquivo .POLY', COR_TEXTO_INFO)
+        B('ler_poly', '[L] Importar mapa', COR_TEXTO_INFO)
         SEP()
         B('modo_orig', '[O] Selec. Origem', COR_TEXTO_OK, self.modo == 'origem')
         B('modo_dest', '[D] Selec. Destino', COR_TEXTO_ERR, self.modo == 'destino')
@@ -111,6 +114,7 @@ class App:
         B('modo_adde', '[A] + Aresta (dupla)', COR_TEXTO_INFO, self.modo == 'add_aresta')
         B('modo_addd', '[U] + Aresta (única)', COR_TEXTO_WARN, self.modo == 'add_aresta_dir')
         B('modo_del', '[X] Deletar Vértice', COR_TEXTO_ERR, self.modo == 'deletar')
+        B('modo_dela', '[Z] Deletar Aresta', COR_TEXTO_ERR, self.modo == 'deletar_aresta')
         B('modo_pan', '[P] Pan (mover mapa)', COR_TEXTO_DIM, self.modo == 'pan')
         SEP()
         B('limpar', '[R] Limpar Seleção', COR_TEXTO_WARN)
@@ -142,7 +146,7 @@ class App:
 
     def carregar_arquivo(self, caminho):
         try:
-            self.grafo = carregar_poly(caminho)
+            self.grafo = carregar_grafo(caminho)
             self.cam.fit(self.grafo.vertices, self.area_grafo().width, self.area_grafo().height)
             self.cam.x += SIDEBAR_W
             self.origem = self.destino = -1
@@ -171,6 +175,47 @@ class App:
             if math.hypot(sx - sx2, sy - sy2) <= max_px:
                 return melhor
         return -1
+
+    def _distancia_ponto_segmento(self, px, py, ax, ay, bx, by):
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
+        ab2 = abx * abx + aby * aby
+        if ab2 == 0:
+            return math.hypot(apx, apy)
+        t = max(0.0, min(1.0, (apx * abx + apy * aby) / ab2))
+        cx = ax + t * abx
+        cy = ay + t * aby
+        return math.hypot(px - cx, py - cy)
+
+    def aresta_mais_proxima(self, sx, sy, max_px=8):
+        if self.grafo is None:
+            return None
+
+        wx, wy = self.cam.tela_para_mundo(sx, sy)
+        melhor = None
+        melhor_d = float('inf')
+
+        for idx, (u, v, directed) in enumerate(self.grafo.arestas_raw):
+            vu = self.grafo.vertices[u]
+            vv = self.grafo.vertices[v]
+            if vu is None or vv is None:
+                continue
+            d = self._distancia_ponto_segmento(wx, wy, vu.x, vu.y, vv.x, vv.y)
+            if d < melhor_d:
+                melhor_d = d
+                melhor = (idx, u, v, directed)
+
+        if melhor is None:
+            return None
+
+        _, u, v, directed = melhor
+        p1 = self.cam.mundo_para_tela(self.grafo.vertices[u].x, self.grafo.vertices[u].y)
+        p2 = self.cam.mundo_para_tela(self.grafo.vertices[v].x, self.grafo.vertices[v].y)
+        if self._distancia_ponto_segmento(sx, sy, p1[0], p1[1], p2[0], p2[1]) <= max_px:
+            return melhor
+        return None
 
     def desenhar_grafo(self, surf):
         if self.grafo is None:
@@ -248,9 +293,10 @@ class App:
                 continue
             pygame.draw.circle(surf, cor, (sx, sy), r)
 
-            if self.mostrar_ids and cam.escala > 0.25 and r > 1:
-                txt = self.fonte_sm.render(str(v.id), True, COR_TEXTO_DIM)
-                surf.blit(txt, (sx + r + 2, sy - 5))
+            if self.mostrar_ids and cam.escala > 0.15:
+                desloc = max(4, r) + 2
+                txt = self.fonte_sm.render(str(v.id), True, COR_TEXTO_INFO)
+                surf.blit(txt, (sx + desloc, sy - 5))
 
         for vid, label, cor in [(self.origem, 'O', COR_ORIGEM), (self.destino, 'D', COR_DESTINO)]:
             if vid < 0:
@@ -330,6 +376,7 @@ class App:
         self.cam.x -= SIDEBAR_W
         self.desenhar_grafo(grafo_surf)
         self.cam.x = cam_backup_x
+        self.ultimo_grafo_surf = grafo_surf.copy()
         self.screen.blit(grafo_surf, (SIDEBAR_W, 0))
 
         self.desenhar_sidebar(self.screen)
@@ -392,6 +439,21 @@ class App:
             else:
                 self.log('Nenhum vértice próximo', 'warn')
 
+        elif self.modo == 'deletar_aresta':
+            alvo = self.aresta_mais_proxima(sx, sy)
+            if alvo is None:
+                self.log('Nenhuma aresta próxima', 'warn')
+                return
+
+            _, u, v, directed = alvo
+            if self.grafo.remover_aresta(u, v, directed):
+                self.caminho = []
+                self.caminho_set = set()
+                tipo = 'dirigida' if directed else 'não-dirigida'
+                self.log(f'Aresta {u}↔{v} removida ({tipo})', 'warn')
+            else:
+                self.log('Falha ao remover aresta', 'err')
+
     def handle_botao(self, nome):
         mapa_modos = {
             'modo_orig': 'origem',
@@ -400,6 +462,7 @@ class App:
             'modo_adde': 'add_aresta',
             'modo_addd': 'add_aresta_dir',
             'modo_del': 'deletar',
+            'modo_dela': 'deletar_aresta',
             'modo_pan': 'pan',
         }
         if nome in mapa_modos:
@@ -436,7 +499,16 @@ class App:
 
             root = tk.Tk()
             root.withdraw()
-            caminho = filedialog.askopenfilename(title='Selecione o arquivo .poly', filetypes=[('Poly files', '*.poly'), ('All', '*.*')])
+            caminho = filedialog.askopenfilename(
+                title='Selecione um mapa',
+                filetypes=[
+                    ('Mapas suportados', '*.poly *.txt *.csv *.tsv *.dat *.osm *.xml *.xlml'),
+                    ('Poly files', '*.poly'),
+                    ('Text files', '*.txt *.csv *.tsv *.dat'),
+                    ('OSM/XML files', '*.osm *.xml *.xlml'),
+                    ('All', '*.*'),
+                ],
+            )
             root.destroy()
             if caminho:
                 self.carregar_arquivo(caminho)
@@ -493,22 +565,75 @@ class App:
 
     def copiar_imagem(self):
         try:
-            nome = f'grafo_{int(time.time())}.png'
-            pygame.image.save(self.screen, nome)
-            self.log(f'Salvo: {nome}', 'ok')
+            surf = self.ultimo_grafo_surf
+            if surf is None:
+                self.log('Nenhuma imagem disponível para copiar', 'warn')
+                return
+
+            largura, altura = surf.get_size()
+            rgba = pygame.image.tobytes(surf, 'RGBA')
+            bgra = bytearray(len(rgba))
+            bgra[0::4] = rgba[2::4]
+            bgra[1::4] = rgba[1::4]
+            bgra[2::4] = rgba[0::4]
+            bgra[3::4] = rgba[3::4]
+
+            header_size = ctypes.sizeof(ctypes.wintypes.BITMAPINFOHEADER)
+            total_size = header_size + len(bgra)
+            mem = ctypes.windll.kernel32.GlobalAlloc(0x2000, total_size)
+            if not mem:
+                raise RuntimeError('Falha ao alocar memória para clipboard')
+
+            ptr = ctypes.windll.kernel32.GlobalLock(mem)
+            if not ptr:
+                ctypes.windll.kernel32.GlobalFree(mem)
+                raise RuntimeError('Falha ao travar memória para clipboard')
+
+            try:
+                header = ctypes.wintypes.BITMAPINFOHEADER()
+                header.biSize = header_size
+                header.biWidth = largura
+                header.biHeight = -altura
+                header.biPlanes = 1
+                header.biBitCount = 32
+                header.biCompression = 0
+                header.biSizeImage = len(bgra)
+                ctypes.memmove(ptr, ctypes.byref(header), header_size)
+                ctypes.memmove(ptr + header_size, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
+            finally:
+                ctypes.windll.kernel32.GlobalUnlock(mem)
+
+            if not ctypes.windll.user32.OpenClipboard(None):
+                ctypes.windll.kernel32.GlobalFree(mem)
+                raise RuntimeError('Falha ao abrir a área de transferência')
+
+            try:
+                ctypes.windll.user32.EmptyClipboard()
+                if not ctypes.windll.user32.SetClipboardData(2, mem):
+                    raise RuntimeError('Falha ao copiar para a área de transferência')
+                mem = None
+            finally:
+                ctypes.windll.user32.CloseClipboard()
+
+            self.log('Imagem do grafo copiada para a área de transferência', 'ok')
         except Exception as e:
-            self.log(f'Erro ao salvar: {e}', 'err')
+            try:
+                nome = f'grafo_{int(time.time())}.png'
+                pygame.image.save(self.screen, nome)
+                self.log(f'Clipboard indisponível; salvo em arquivo: {nome}', 'warn')
+            except Exception as fallback_error:
+                self.log(f'Erro ao copiar/salvar: {e} | fallback: {fallback_error}', 'err')
 
     def run(self):
         if len(sys.argv) > 1 and os.path.exists(sys.argv[1]):
             self.carregar_arquivo(sys.argv[1])
         else:
-            polys = [f for f in os.listdir('.') if f.endswith('.poly')]
-            if polys:
-                self.carregar_arquivo(polys[0])
+            mapas = [f for f in os.listdir('.') if f.lower().endswith(('.poly', '.txt', '.csv', '.tsv', '.dat', '.osm', '.xml', '.xlml'))]
+            if mapas:
+                self.carregar_arquivo(mapas[0])
             else:
-                self.log('Nenhum .poly encontrado.', 'warn')
-                self.log('Use: python main.py arquivo.poly', 'info')
+                self.log('Nenhum mapa suportado encontrado.', 'warn')
+                self.log('Use: python main.py arquivo.poly|txt|osm|xml', 'info')
 
         running = True
         while running:
@@ -574,6 +699,8 @@ class App:
                         self.set_modo('add_aresta_dir')
                     elif k == pygame.K_x:
                         self.set_modo('deletar')
+                    elif k == pygame.K_z:
+                        self.set_modo('deletar_aresta')
                     elif k == pygame.K_l:
                         self.pedir_arquivo()
                     elif k == pygame.K_n:
