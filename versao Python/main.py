@@ -79,6 +79,10 @@ class App:
         self.fonte_md = pygame.font.SysFont('monospace', 13)
         self.fonte_lg = pygame.font.SysFont('monospace', 15, bold=True)
         self.fonte_xl = pygame.font.SysFont('monospace', 18, bold=True)
+        # Fonte usada para estatísticas e logs na sidebar (um pouco maior)
+        self.fonte_log = pygame.font.SysFont('monospace', 14)
+        # Scroll offset para logs da sidebar (0 = fim / mais recentes)
+        self.log_scroll = 0
 
         self.grafo = None
         self.cam = Camera()
@@ -116,8 +120,9 @@ class App:
         self._layout_botoes()
 
     def _layout_botoes(self):
-        sx, bw, bh, gap = 8, SIDEBAR_W - 16, 24, 4
-        y = 56
+        sx, bw, bh, gap = 8, SIDEBAR_W - 16, 24, 6
+        # Iniciar os botões mais abaixo para dar espaço ao cabeçalho maior
+        y = 84
 
         def B(nome, txt, cor=None, ativo=False):
             nonlocal y
@@ -153,11 +158,14 @@ class App:
         B('sair', '[Q] Sair', COR_TEXTO_ERR)
 
         self._y_stats = y + 8
-        self._y_log = self._y_stats + 130
+        # Ajuste: começar a área de logs mais cedo (menor offset) para aumentar espaço
+        self._y_log = self._y_stats + 80
 
     def log(self, msg, tipo='info'):
         cores = {'info': COR_TEXTO_INFO, 'ok': COR_TEXTO_OK, 'warn': COR_TEXTO_WARN, 'err': COR_TEXTO_ERR}
         self.log_msgs.append((msg, cores.get(tipo, COR_TEXTO)))
+        # Ao adicionar nova mensagem, reposicionar para o fim (auto-scroll)
+        self.log_scroll = 0
         if len(self.log_msgs) > 60:
             self.log_msgs.pop(0)
 
@@ -247,6 +255,9 @@ class App:
         if self.grafo is None:
             return
 
+        # Area do grafo (usada apenas para dimensões). Ao desenhar, não
+        # filtramos vértices por colisão com a área para garantir que IDs e
+        # pesos apareçam consistentemente durante pan/zoom.
         area = self.area_grafo()
         cam = self.cam
         caminho_set_pares = set()
@@ -289,17 +300,19 @@ class App:
                 ]
                 pygame.draw.polygon(surf, cor, ponta)
 
-            if self.mostrar_pesos and cam.escala > 0.15:
-                d = math.hypot(vu.x - vv.x, vu.y - vv.y)
-                txt = self.fonte_sm.render(f'{d:.0f}', True, COR_TEXTO_DIM)
-                surf.blit(txt, ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2))
+            if self.mostrar_pesos:
+                # Mostrar pesos independente do zoom quando a opção estiver ativa.
+                try:
+                    d = math.hypot(vu.x - vv.x, vu.y - vv.y)
+                    txt = self.fonte_sm.render(f'{d:.0f}', True, COR_TEXTO_DIM)
+                    surf.blit(txt, ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2))
+                except Exception:
+                    pass
 
         for v in self.grafo.vertices:
             if v is None:
                 continue
             sx, sy = cam.mundo_para_tela(v.x, v.y)
-            if not area.collidepoint(sx, sy):
-                continue
 
             r = max(1, int(self.tam_vertice))
 
@@ -319,10 +332,14 @@ class App:
                 continue
             pygame.draw.circle(surf, cor, (sx, sy), r)
 
-            if self.mostrar_ids and cam.escala > 0.15:
-                desloc = max(4, r) + 2
-                txt = self.fonte_sm.render(str(v.id), True, COR_TEXTO_INFO)
-                surf.blit(txt, (sx + desloc, sy - 5))
+            if self.mostrar_ids:
+                # Mostrar IDs independente do zoom quando a opção estiver ativa.
+                try:
+                    desloc = max(4, r) + 2
+                    txt = self.fonte_sm.render(str(v.id), True, COR_TEXTO_INFO)
+                    surf.blit(txt, (sx + desloc, sy - 5))
+                except Exception:
+                    pass
 
         for vid, label, cor in [(self.origem, 'O', COR_ORIGEM), (self.destino, 'D', COR_DESTINO)]:
             if vid < 0:
@@ -341,11 +358,12 @@ class App:
         pygame.draw.rect(surf, COR_SIDEBAR, (0, 0, SIDEBAR_W, H))
         pygame.draw.line(surf, COR_BORDA, (SIDEBAR_W, 0), (SIDEBAR_W, H), 1)
 
-        pygame.draw.rect(surf, COR_PAINEL, (0, 0, SIDEBAR_W, 52))
+        # Cabeçalho maior para título e descrições
+        pygame.draw.rect(surf, COR_PAINEL, (0, 0, SIDEBAR_W, 72))
         t = self.fonte_xl.render('NavGrafo UFG', True, COR_TEXTO_INFO)
         surf.blit(t, (8, 8))
         sub = self.fonte_sm.render('AED2 2026-1 | Dijkstra', True, COR_TEXTO_DIM)
-        surf.blit(sub, (8, 32))
+        surf.blit(sub, (8, 40))
 
         for b in self.botoes.values():
             b.desenhar(surf, self.fonte_sm)
@@ -355,11 +373,11 @@ class App:
 
         def stat(label, valor, cor=COR_TEXTO_INFO):
             nonlocal y
-            l = self.fonte_sm.render(label, True, COR_TEXTO_DIM)
-            v = self.fonte_sm.render(str(valor), True, cor)
+            l = self.fonte_log.render(label, True, COR_TEXTO_DIM)
+            v = self.fonte_log.render(str(valor), True, cor)
             surf.blit(l, (8, y))
             surf.blit(v, (SIDEBAR_W - v.get_width() - 8, y))
-            y += 17
+            y += self.fonte_log.get_linesize() + 2
 
         stat('Vértices:', self.grafo.total_vertices if self.grafo else 0)
         stat('Arestas:', self.grafo.total_arestas if self.grafo else 0)
@@ -373,11 +391,12 @@ class App:
         y = self._y_log
         if y < H:
             pygame.draw.line(surf, COR_BORDA, (8, y - 4), (SIDEBAR_W - 8, y - 4), 1)
-            linhas_vis = (H - y) // 15
+            line_h = self.fonte_log.get_linesize() + 2
+            linhas_vis = max(1, (H - y) // line_h)
             for msg, cor in self.log_msgs[-linhas_vis:]:
-                txt = self.fonte_sm.render(f'> {msg}', True, cor)
+                txt = self.fonte_log.render(f'> {msg}', True, cor)
                 surf.blit(txt, (8, y))
-                y += 15
+                y += line_h
 
     def desenhar_statusbar(self, surf):
         W, H = self.screen.get_size()
@@ -597,51 +616,164 @@ class App:
                 return
 
             largura, altura = surf.get_size()
-            rgba = pygame.image.tobytes(surf, 'RGBA')
+            # Garantir formato 32-bit com alpha para tobytes ser consistente
+            try:
+                surf32 = surf.convert_alpha()
+            except Exception:
+                surf32 = surf.copy()
+            rgba = pygame.image.tobytes(surf32, 'RGBA')
+            # Converte RGBA->BGRA
             bgra = bytearray(len(rgba))
             bgra[0::4] = rgba[2::4]
             bgra[1::4] = rgba[1::4]
             bgra[2::4] = rgba[0::4]
             bgra[3::4] = rgba[3::4]
 
-            header_size = ctypes.sizeof(ctypes.wintypes.BITMAPINFOHEADER)
+            # Tentar criar um HBITMAP via CreateDIBSection (melhor compatibilidade)
+            try:
+                gdi32 = ctypes.windll.gdi32
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+
+                class BITMAPINFOHEADER(ctypes.Structure):
+                    _fields_ = [
+                        ('biSize', ctypes.c_uint32),
+                        ('biWidth', ctypes.c_int32),
+                        ('biHeight', ctypes.c_int32),
+                        ('biPlanes', ctypes.c_uint16),
+                        ('biBitCount', ctypes.c_uint16),
+                        ('biCompression', ctypes.c_uint32),
+                        ('biSizeImage', ctypes.c_uint32),
+                        ('biXPelsPerMeter', ctypes.c_int32),
+                        ('biYPelsPerMeter', ctypes.c_int32),
+                        ('biClrUsed', ctypes.c_uint32),
+                        ('biClrImportant', ctypes.c_uint32),
+                    ]
+
+                header = BITMAPINFOHEADER()
+                header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+                header.biWidth = largura
+                # Use altura positiva e copie linhas invertidas (bottom-up) para DIB
+                header.biHeight = altura
+                header.biPlanes = 1
+                header.biBitCount = 32
+                header.biCompression = 0  # BI_RGB
+                header.biSizeImage = len(bgra)
+                header.biXPelsPerMeter = 0
+                header.biYPelsPerMeter = 0
+                header.biClrUsed = 0
+                header.biClrImportant = 0
+
+                ppvBits = ctypes.c_void_p()
+                # CreateDIBSection(hdc=NULL, pbmi=&header, usage=0, ppvBits, NULL, 0)
+                hbm = gdi32.CreateDIBSection(0, ctypes.byref(header), 0, ctypes.byref(ppvBits), None, 0)
+                if hbm:
+                    # Copiar dados de pixels: DIB bottom-up (linha 0 = última linha)
+                    row_bytes = largura * 4
+                    for y in range(altura):
+                        src_off = (altura - 1 - y) * row_bytes
+                        dest_off = y * row_bytes
+                        dest_ptr = ppvBits.value + dest_off
+                        src_slice = (ctypes.c_ubyte * row_bytes).from_buffer(bgra, src_off)
+                        ctypes.memmove(dest_ptr, src_slice, row_bytes)
+
+                    # Colocar HBITMAP no clipboard como CF_BITMAP (2)
+                    CF_BITMAP = 2
+                    # Abrir clipboard com retries (pode estar ocupado)
+                    opened = False
+                    for _ in range(6):
+                        if user32.OpenClipboard(None):
+                            opened = True
+                            break
+                        time.sleep(0.05)
+                    if not opened:
+                        # Cleanup HBITMAP if we can't open clipboard
+                        gdi32.DeleteObject(hbm)
+                        raise RuntimeError('Falha ao abrir clipboard (CreateDIBSection path)')
+                    try:
+                        user32.EmptyClipboard()
+                        if not user32.SetClipboardData(CF_BITMAP, hbm):
+                            # Se SetClipboardData falhar, liberar HBITMAP
+                            gdi32.DeleteObject(hbm)
+                            raise RuntimeError('Falha ao SetClipboardData(CF_BITMAP)')
+                        # Sucesso: o sistema Windows assume ownership do HBITMAP
+                        hbm = None
+                    finally:
+                        user32.CloseClipboard()
+
+                    self.log('Imagem do grafo copiada para a área de transferência (HBITMAP)', 'ok')
+                    return
+            except Exception:
+                # Se algo falhar no caminho HBITMAP, tentamos DIB diretamente
+                pass
+
+            # Fallback: usar CF_DIB (BITMAPINFOHEADER + pixels em global memory)
+            class BITMAPINFOHEADER2(ctypes.Structure):
+                _fields_ = [
+                    ('biSize', ctypes.c_uint32),
+                    ('biWidth', ctypes.c_int32),
+                    ('biHeight', ctypes.c_int32),
+                    ('biPlanes', ctypes.c_uint16),
+                    ('biBitCount', ctypes.c_uint16),
+                    ('biCompression', ctypes.c_uint32),
+                    ('biSizeImage', ctypes.c_uint32),
+                    ('biXPelsPerMeter', ctypes.c_int32),
+                    ('biYPelsPerMeter', ctypes.c_int32),
+                    ('biClrUsed', ctypes.c_uint32),
+                    ('biClrImportant', ctypes.c_uint32),
+                ]
+
+            header2 = BITMAPINFOHEADER2()
+            header2.biSize = ctypes.sizeof(BITMAPINFOHEADER2)
+            header2.biWidth = largura
+            # altura negativa para indicar top-down (ordem do Pygame)
+            header2.biHeight = -altura
+            header2.biPlanes = 1
+            header2.biBitCount = 32
+            header2.biCompression = 0
+            header2.biSizeImage = len(bgra)
+
+            header_size = ctypes.sizeof(header2)
             total_size = header_size + len(bgra)
-            mem = ctypes.windll.kernel32.GlobalAlloc(0x2000, total_size)
+
+            GMEM_MOVEABLE = 0x0002
+            mem = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE, total_size)
             if not mem:
-                raise RuntimeError('Falha ao alocar memória para clipboard')
+                raise RuntimeError('Falha ao alocar memória para clipboard (DIB fallback)')
 
             ptr = ctypes.windll.kernel32.GlobalLock(mem)
             if not ptr:
                 ctypes.windll.kernel32.GlobalFree(mem)
-                raise RuntimeError('Falha ao travar memória para clipboard')
+                raise RuntimeError('Falha ao travar memória para clipboard (DIB fallback)')
 
             try:
-                header = ctypes.wintypes.BITMAPINFOHEADER()
-                header.biSize = header_size
-                header.biWidth = largura
-                header.biHeight = -altura
-                header.biPlanes = 1
-                header.biBitCount = 32
-                header.biCompression = 0
-                header.biSizeImage = len(bgra)
-                ctypes.memmove(ptr, ctypes.byref(header), header_size)
-                ctypes.memmove(ptr + header_size, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
+                ctypes.memmove(ptr, ctypes.byref(header2), header_size)
+                dest = ptr + header_size
+                ctypes.memmove(dest, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
             finally:
                 ctypes.windll.kernel32.GlobalUnlock(mem)
 
-            if not ctypes.windll.user32.OpenClipboard(None):
+            CF_DIB = 8
+            # Abrir clipboard com retries
+            opened = False
+            for _ in range(6):
+                if ctypes.windll.user32.OpenClipboard(None):
+                    opened = True
+                    break
+                time.sleep(0.05)
+            if not opened:
                 ctypes.windll.kernel32.GlobalFree(mem)
-                raise RuntimeError('Falha ao abrir a área de transferência')
+                raise RuntimeError('Falha ao abrir a área de transferência (DIB fallback)')
 
             try:
                 ctypes.windll.user32.EmptyClipboard()
-                if not ctypes.windll.user32.SetClipboardData(2, mem):
-                    raise RuntimeError('Falha ao copiar para a área de transferência')
+                if not ctypes.windll.user32.SetClipboardData(CF_DIB, mem):
+                    raise RuntimeError('Falha ao copiar para a área de transferência (DIB fallback)')
                 mem = None
             finally:
                 ctypes.windll.user32.CloseClipboard()
 
-            self.log('Imagem do grafo copiada para a área de transferência', 'ok')
+            self.log('Imagem do grafo copiada para a área de transferência (DIB fallback)', 'ok')
         except Exception as e:
             try:
                 nome = f'grafo_{int(time.time())}.png'
