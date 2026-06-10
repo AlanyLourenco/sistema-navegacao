@@ -1,8 +1,30 @@
 """
 Estruturas centrais do sistema de navegação em grafos.
 
-Este módulo nao importa pygame e concentra apenas logica de dados e leitura
-de arquivos .poly, .txt estruturado e mapas OSM/XML.
+1. Para que serve o arquivo:
+     - Responsabilidade: modelar o grafo (vértices, arestas) e fornecer
+         funções de carregamento de mapas (arquivos .poly, .txt estruturado, OSM/XML)
+         convertendo-os para a estrutura interna `Grafo`.
+
+2. Como funciona (resumo):
+     - Define `Vertice` (com `__slots__` para economia de memória) e `Grafo`
+         (lista de vértices, lista de adjacência, `arestas_raw` para desenho/edição).
+     - Implementa leitores: `carregar_poly`, `carregar_txt`, `carregar_osm_xml` e
+         `carregar_grafo` (detector automático por extensão/conteúdo).
+     - Fornece utilitários: projeção geográfica `_projetar_latlon`, cálculo de
+         distância `_dist` e funções auxiliares de inserção/remocão de arestas.
+
+3. Quais requisitos atende (mapa rápido):
+     - RF01: Importar mapas reais e converter para grafos — via `carregar_osm_xml`.
+     - RF02 / RF06: Vértices enumerados, arestas com pesos e suporte a dirigidas —
+         `adicionar_vertice`, `adicionar_aresta`, estrutura `(v, peso, directed)`.
+     - RNF05: Uso eficiente de memória — `Vertice.__slots__` reduz overhead.
+     - RNF03: Parsers otimizados para arquivos grandes — `carregar_osm_xml` usa
+         `xml.etree.ElementTree.iterparse` em modo streaming e chama `elem.clear()`.
+
+Notas de manutenção:
+     - `Grafo.remover_aresta` faz busca/remoção em `arestas_raw` e sincroniza `adj`.
+     - `carregar_grafo` tenta inferir formato por extensão e por conteúdo inicial.
 """
 
 import math

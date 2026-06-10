@@ -1,5 +1,23 @@
 """
 Componentes de interface e constantes visuais do sistema.
+
+1. Para que serve o arquivo:
+     - Centraliza as constantes visuais (cores, tamanhos) e componentes UI leves
+         usados pela aplicação: `Camera` e `Botao`.
+
+2. Como funciona (resumo):
+     - `Camera` converte coordenadas mundo↔tela, controla zoom e faz o `fit`
+         automático do mapa no espaço disponível.
+     - `Botao` encapsula retângulo, estado de hover/ativo e desenho simples.
+
+3. Quais requisitos atende:
+     - RNF06: Interface intuitiva — componentes reutilizáveis e constantes bem
+         definidas facilitam manutenção do visual.
+     - RNF05: Otimizações visuais simples (evitar desenho desnecessário no `fit`).
+
+Notas de manutenção:
+     - Ajuste de `SIDEBAR_W`, `FPS` e cores afeta toda a aplicação; manter
+         consistência ao alterar.
 """
 
 import pygame

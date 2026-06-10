@@ -1,5 +1,31 @@
 """
-Aplicacao principal do sistema de navegacao em grafos com Pygame.
+Aplicação principal do sistema de navegação em grafos com Pygame.
+
+1. Para que serve o arquivo:
+     - Orquestra a interface gráfica (Pygame), entrada do usuário, desenho do
+         grafo, modos de edição e integrações com os módulos `core` e `algorithms`.
+
+2. Como funciona (resumo):
+     - Inicializa a janela, fontes, botões e a `Camera` e mantém o estado da
+         aplicação (`grafo`, `origem`, `destino`, `caminho`, modos de edição).
+     - Fornece handlers: `handle_click`, `handle_botao`, `pedir_arquivo`, e o
+         laço principal `run()` que processa eventos, teclas e desenha a tela.
+     - Implementa seleção por clique (`vertice_mais_proximo`), busca da aresta
+         mais próxima (`aresta_mais_proxima`), execução de Dijkstra
+         (`executar_dijkstra`) e exportação para clipboard (`copiar_imagem`).
+
+3. Quais requisitos atende:
+     - RF03: Seleção de origem/destino com feedback visual e desfazer.
+     - RF04: Chamadas para `dijkstra` e exibição de resultados/estatísticas.
+     - RF05: Modo de edição para adicionar/remover vértices e arestas via mouse.
+     - RF07: Exibição de estatísticas (nós explorados, tempo) no painel lateral.
+     - RNF07: Multiplataforma (Pygame); contém fallback para clipboard em caso de
+         indisponibilidade no Windows (salva PNG).
+
+Notas de manutenção:
+     - `copiar_imagem` faz manipulação nativa do clipboard via `ctypes` (Windows).
+     - `vertice_mais_proximo` e `aresta_mais_proxima` são implementações O(V)/O(E)
+         e podem ser aceleradas com uma estrutura espacial (R-tree) para grafos grandes.
 """
 
 import math
