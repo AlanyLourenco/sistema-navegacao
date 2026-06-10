@@ -227,11 +227,3 @@ RNF08 — Código modular e bem documentado (0.25)
 - Onde: estrutura em módulos (`core`, `algorithms`, `gui`, `main`) e documentação adicionada em `DOCUMENTATION.md` e `SOFTWARE_ENGINEERING.md`.
 
 ---
-
-## Próximos passos práticos
-- Quer que eu gere automaticamente:
-  - Slides Markdown prontos para converter em PPTX; ou
-  - Implementação A* com comparação automática (cria/edita `versao Python/algorithms.py` e adiciona benchmark); ou
-  - Integração R-tree para seleção acelerada (adiciona dependência e modifica `vertice_mais_proximo` / `aresta_mais_proxima`).
-
-Informe qual opção prefere e eu implemento. Também posso refinar trechos de código com referências de linha exatas se desejar.

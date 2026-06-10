@@ -89,28 +89,3 @@ python -m pip install pygame
 cd "versao Python"
 python main.py
 ```
-
-**Exemplos de medidas e testes para apresentação**
-- Execute rotas entre pontos conhecidos no arquivo `Campus2UFG&Regiao.osm` (presente na pasta `versao Python`) e apresente:
-  - `distancia_total`, `nos_explorados`, e `tempo_ms` retornados por `dijkstra`.
-  - Compare execução Dijkstra vs A* (implementar A* para comparação) em pelo menos 2 mapas com ~100 e ~1000 vértices.
-
-**Roteiro de slides (focado em Python)**
-- Slide 1 — Título: "NavGrafo UFG — Versão Python" (objetivo da versão Python)
-- Slide 2 — Arquitetura: `core.py` → `algorithms.py` → `main.py`/`gui.py` (diagrama)
-- Slide 3 — Estruturas: `Vertice` e `Grafo` (mostrar exemplo de `adj` e `arestas_raw`)
-- Slide 4 — Carregamento OSM: `carregar_osm_xml` e projeção (`_projetar_latlon`)
-- Slide 5 — Dijkstra: pseudocódigo e pontos de implementação (heapq, early exit, vértices removidos)
-- Slide 6 — Métricas experimentais: `nos_explorados` e `tempo_ms` (tabelas/gráficos sugeridos)
-- Slide 7 — Limitações e melhorias propostas (A*, R-tree, bidirecional)
-- Slide 8 — Demonstração: executar `main.py` e carregar `Campus2UFG&Regiao.osm`
-- Slide 9 — Conclusão e próximos passos
-
----
-
-Se quiser, eu posso agora:
-- Gerar slides em Markdown prontos para converter para PPTX.
-- Implementar e adicionar uma versão A* em `versao Python/algorithms.py` com comparação automática.
-- Implementar uma R-tree simples (via `rtree` ou `pygeos`) para acelerar buscas interativas.
-
-Diga qual opção prefere e eu executo o próximo passo.
