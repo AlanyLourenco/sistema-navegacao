@@ -82,7 +82,8 @@ class App:
         # Fonte usada para estatísticas e logs na sidebar (um pouco maior)
         self.fonte_log = pygame.font.SysFont('monospace', 14)
         # Scroll offset para logs da sidebar (0 = fim / mais recentes)
-        self.log_scroll = 0
+        # Scroll vertical geral da sidebar (pixels). 0 = topo.
+        self.sidebar_scroll = 0
 
         self.grafo = None
         self.cam = Camera()
@@ -121,8 +122,9 @@ class App:
 
     def _layout_botoes(self):
         sx, bw, bh, gap = 8, SIDEBAR_W - 16, 24, 6
-        # Iniciar os botões mais abaixo para dar espaço ao cabeçalho maior
-        y = 84
+        # Iniciar os botões logo abaixo do cabeçalho
+        y = 76
+        
 
         def B(nome, txt, cor=None, ativo=False):
             nonlocal y
@@ -161,11 +163,19 @@ class App:
         # Ajuste: começar a área de logs mais cedo (menor offset) para aumentar espaço
         self._y_log = self._y_stats + 80
 
+    def _sidebar_content_height(self):
+        # Estimativa do tamanho vertical total do conteúdo da sidebar
+        line_h = self.fonte_log.get_linesize() + 2
+        # Os logs agora são exibidos em um painel separado (canto superior direito),
+        # portanto não contam mais para a altura rolável da sidebar.
+        logs_h = 0
+        return self._y_log + logs_h + 24
+
     def log(self, msg, tipo='info'):
         cores = {'info': COR_TEXTO_INFO, 'ok': COR_TEXTO_OK, 'warn': COR_TEXTO_WARN, 'err': COR_TEXTO_ERR}
         self.log_msgs.append((msg, cores.get(tipo, COR_TEXTO)))
         # Ao adicionar nova mensagem, reposicionar para o fim (auto-scroll)
-        self.log_scroll = 0
+        self.sidebar_scroll = 0
         if len(self.log_msgs) > 60:
             self.log_msgs.pop(0)
 
@@ -358,25 +368,24 @@ class App:
         pygame.draw.rect(surf, COR_SIDEBAR, (0, 0, SIDEBAR_W, H))
         pygame.draw.line(surf, COR_BORDA, (SIDEBAR_W, 0), (SIDEBAR_W, H), 1)
 
-        # Cabeçalho maior para título e descrições
-        pygame.draw.rect(surf, COR_PAINEL, (0, 0, SIDEBAR_W, 72))
-        t = self.fonte_xl.render('NavGrafo UFG', True, COR_TEXTO_INFO)
-        surf.blit(t, (8, 8))
-        sub = self.fonte_sm.render('AED2 2026-1 | Dijkstra', True, COR_TEXTO_DIM)
-        surf.blit(sub, (8, 40))
+        # O cabeçalho é desenhado por cima do conteúdo no final para que
+        # ele permaneça fixo enquanto o restante da sidebar rola por baixo.
 
         for b in self.botoes.values():
-            b.desenhar(surf, self.fonte_sm)
+            b.desenhar(surf, self.fonte_sm, scroll=self.sidebar_scroll)
 
         y = self._y_stats
-        pygame.draw.line(surf, COR_BORDA, (8, y - 4), (SIDEBAR_W - 8, y - 4), 1)
+        pygame.draw.line(surf, COR_BORDA, (8, y - 4 - self.sidebar_scroll), (SIDEBAR_W - 8, y - 4 - self.sidebar_scroll), 1)
 
         def stat(label, valor, cor=COR_TEXTO_INFO):
             nonlocal y
             l = self.fonte_log.render(label, True, COR_TEXTO_DIM)
             v = self.fonte_log.render(str(valor), True, cor)
-            surf.blit(l, (8, y))
-            surf.blit(v, (SIDEBAR_W - v.get_width() - 8, y))
+            y_draw = y - self.sidebar_scroll
+            # Desenhar apenas se visível na janela
+            if -40 < y_draw < H - 24:
+                surf.blit(l, (8, y_draw))
+                surf.blit(v, (SIDEBAR_W - v.get_width() - 8, y_draw))
             y += self.fonte_log.get_linesize() + 2
 
         stat('Vértices:', self.grafo.total_vertices if self.grafo else 0)
@@ -388,15 +397,41 @@ class App:
         stat('Nós no caminho:', len(self.caminho) if self.caminho else '—')
         stat('Tempo (ms):', f'{self.tempo_ms:.1f}' if self.caminho else '—')
 
-        y = self._y_log
-        if y < H:
-            pygame.draw.line(surf, COR_BORDA, (8, y - 4), (SIDEBAR_W - 8, y - 4), 1)
-            line_h = self.fonte_log.get_linesize() + 2
-            linhas_vis = max(1, (H - y) // line_h)
-            for msg, cor in self.log_msgs[-linhas_vis:]:
-                txt = self.fonte_log.render(f'> {msg}', True, cor)
-                surf.blit(txt, (8, y))
-                y += line_h
+        # Antes os logs eram desenhados aqui na sidebar; eles foram movidos para
+        # um painel flutuante no canto superior direito da área do grafo.
+
+        # Desenhar cabeçalho por cima para ficar sempre visível
+        pygame.draw.rect(surf, COR_PAINEL, (0, 0, SIDEBAR_W, 40))
+        t = self.fonte_xl.render('NavGrafo UFG', True, COR_TEXTO_INFO)
+        surf.blit(t, (6, 6))
+        
+
+    def desenhar_logs(self, surf):
+        # Desenha as mensagens de log em um painel no canto superior direito
+        if not self.log_msgs:
+            return
+        area = self.area_grafo()
+        # Painel com largura limitada (proporcional à área do grafo)
+        panel_w = min(420, max(220, area.width // 3))
+        padding = 8
+        line_h = self.fonte_log.get_linesize() + 2
+        max_lines = 6
+        msgs = self.log_msgs[-max_lines:]
+        panel_h = padding * 2 + line_h * len(msgs)
+
+        panel_x = area.x + area.width - panel_w - 8
+        panel_y = 8
+
+        # Fundo e borda do painel
+        pygame.draw.rect(surf, COR_PAINEL, (panel_x, panel_y, panel_w, panel_h))
+        pygame.draw.rect(surf, COR_BORDA, (panel_x, panel_y, panel_w, panel_h), 1)
+
+        y = panel_y + padding
+        for msg, cor in msgs:
+            txt = self.fonte_log.render(f'> {msg}', True, cor)
+            # Texto com margem esquerda dentro do painel
+            surf.blit(txt, (panel_x + padding, y))
+            y += line_h
 
     def desenhar_statusbar(self, surf):
         W, H = self.screen.get_size()
@@ -424,13 +459,16 @@ class App:
         self.ultimo_grafo_surf = grafo_surf.copy()
         self.screen.blit(grafo_surf, (SIDEBAR_W, 0))
 
+        # Desenhar painel de logs sobre a área do grafo (canto superior direito)
+        self.desenhar_logs(self.screen)
+
         self.desenhar_sidebar(self.screen)
         self.desenhar_statusbar(self.screen)
         pygame.display.flip()
 
     def handle_click(self, sx, sy, botao_mouse):
         for nome, btn in self.botoes.items():
-            if btn.clicado((sx, sy)):
+            if btn.clicado((sx, sy), scroll=self.sidebar_scroll):
                 self.handle_botao(nome)
                 return
 
@@ -805,7 +843,7 @@ class App:
                 elif event.type == pygame.MOUSEMOTION:
                     pos = event.pos
                     for b in self.botoes.values():
-                        b.checar_hover(pos)
+                        b.checar_hover(pos, scroll=self.sidebar_scroll)
                     if self.pan_ativo:
                         dx = pos[0] - self.pan_start[0]
                         dy = pos[1] - self.pan_start[1]
@@ -823,13 +861,41 @@ class App:
                         self.pan_ativo = True
                         self.pan_start = event.pos
                         self.cam_start = (self.cam.x, self.cam.y)
-                    elif event.button == 4:
-                        self.cam.zoom(1.15, *event.pos)
-                    elif event.button == 5:
-                        self.cam.zoom(1 / 1.15, *event.pos)
+                    elif event.button in (4, 5):
+                        # Mouse wheel (legacy buttons): rolar a sidebar se estiver sobre ela,
+                        # caso contrário fazer zoom.
+                        mx, my = event.pos
+                        if mx <= SIDEBAR_W:
+                            # Calcular limites de rolagem em pixels
+                            content_h = self._sidebar_content_height()
+                            H = self.screen.get_height()
+                            max_scroll = max(0, content_h - H)
+                            step = 24
+                            if event.button == 4:
+                                # wheel up -> subir conteúdo (mostrar parte inferior)
+                                self.sidebar_scroll = min(max_scroll, self.sidebar_scroll + step)
+                            else:
+                                self.sidebar_scroll = max(0, self.sidebar_scroll - step)
+                        else:
+                            if event.button == 4:
+                                self.cam.zoom(1.15, *event.pos)
+                            else:
+                                self.cam.zoom(1 / 1.15, *event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button in (1, 2):
                         self.pan_ativo = False
+                elif event.type == pygame.MOUSEWHEEL:
+                    # Pygame mouse wheel event (event.y: 1 up, -1 down)
+                    mx, my = pygame.mouse.get_pos()
+                    if mx <= SIDEBAR_W:
+                        content_h = self._sidebar_content_height()
+                        H = self.screen.get_height()
+                        max_scroll = max(0, content_h - H)
+                        step = 24
+                        if event.y > 0:
+                            self.sidebar_scroll = min(max_scroll, self.sidebar_scroll + step)
+                        else:
+                            self.sidebar_scroll = max(0, self.sidebar_scroll - step)
                 elif event.type == pygame.KEYDOWN:
                     k = event.key
                     if k == pygame.K_q:
@@ -873,6 +939,14 @@ class App:
                     elif k == pygame.K_MINUS:
                         cx, cy = W // 2, H // 2
                         self.cam.zoom(1 / 1.2, cx, cy)
+                    elif k == pygame.K_PAGEUP:
+                        # rolar sidebar para cima
+                        content_h = self._sidebar_content_height()
+                        H = self.screen.get_height()
+                        max_scroll = max(0, content_h - H)
+                        self.sidebar_scroll = min(max_scroll, self.sidebar_scroll + 80)
+                    elif k == pygame.K_PAGEDOWN:
+                        self.sidebar_scroll = max(0, self.sidebar_scroll - 80)
 
             self.desenhar()
             self.clock.tick(FPS)

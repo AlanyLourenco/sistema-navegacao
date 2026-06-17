@@ -102,8 +102,23 @@ class Botao:
         r = txt.get_rect(center=self.rect.center)
         surf.blit(txt, r)
 
-    def checar_hover(self, pos):
-        self.hover = self.rect.collidepoint(pos)
+    def checar_hover(self, pos, scroll=0):
+        # `scroll` é o offset vertical atual da sidebar; ao desenhar, os botões
+        # são deslocados em y por `-scroll`. Aqui usamos uma cópia deslocada
+        # para verificar hover sem alterar a posição real do botão.
+        rect = self.rect.move(0, -scroll)
+        self.hover = rect.collidepoint(pos)
 
-    def clicado(self, pos):
-        return self.rect.collidepoint(pos)
+    def clicado(self, pos, scroll=0):
+        rect = self.rect.move(0, -scroll)
+        return rect.collidepoint(pos)
+
+    def desenhar(self, surf, fonte, scroll=0):
+        # Desenha o botão deslocado verticalmente de acordo com `scroll`.
+        rect = self.rect.move(0, -scroll)
+        cor_bg = COR_BTN_ATIVO if self.ativo else (COR_BTN_HOVER if self.hover else COR_BTN)
+        pygame.draw.rect(surf, cor_bg, rect, border_radius=4)
+        pygame.draw.rect(surf, COR_BORDA, rect, 1, border_radius=4)
+        txt = fonte.render(self.texto, True, self.cor_texto if self.ativo or self.hover else COR_TEXTO_DIM)
+        r = txt.get_rect(center=rect.center)
+        surf.blit(txt, r)
