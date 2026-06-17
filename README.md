@@ -30,7 +30,7 @@ Principais objetivos:
 
 - Python 3.8+ (para a versão Python)
 - Pygame: `pip install pygame`
-- (Opcional, para copiar imagem ao clipboard no Windows) `pywin32` e `Pillow` — o projeto tenta usar a API nativa do Windows; se não estiver disponível, faz fallback salvando PNG.
+- Clipboard no Windows é feito via PowerShell (`System.Windows.Forms`) — sem dependências extras; requer apenas Python padrão.
 - Navegador moderno (para a versão JavaScript)
 - Compilador C (gcc/clang) se quiser compilar os arquivos em `trabalho final/`.
 
@@ -100,7 +100,7 @@ Versão C (conversores):
 - RF04: Exibir menor caminho em cor diferenciada → Dijkstra + renderização em `main.py`.
 - RF05: Edição por clique (adicionar/remover vértices/arestas) → modos na UI.
 - RF07: Exibir estatísticas do algoritmo (tempo, nós explorados, custo) → painel lateral.
-- RF08: Copiar imagem → tecla `I`; implementação tenta enviar imagem ao clipboard no Windows, com fallback para salvar arquivo PNG.
+- RF08: Copiar imagem → tecla `I`; no Windows usa PowerShell (`Clipboard::SetImage`) com fallback para salvar PNG.
 
 ---
 

@@ -23,7 +23,7 @@ Aplicação principal do sistema de navegação em grafos com Pygame.
          indisponibilidade no Windows (salva PNG).
 
 Notas de manutenção:
-     - `copiar_imagem` faz manipulação nativa do clipboard via `ctypes` (Windows).
+     - `copiar_imagem` usa PowerShell + System.Windows.Forms no Windows.
      - `vertice_mais_proximo` e `aresta_mais_proxima` são implementações O(V)/O(E)
          e podem ser aceleradas com uma estrutura espacial (R-tree) para grafos grandes.
 """
@@ -32,7 +32,6 @@ import math
 import os
 import sys
 import time
-import ctypes
 
 import pygame
 
@@ -665,7 +664,7 @@ class App:
         if sistema != 'Windows':
             self._copiar_linux(surf)
             return
-        # Windows: síncrono via ctypes
+        # Windows: via PowerShell
         try:
             self._copiar_windows(surf)
             self.log('Imagem copiada para a área de transferência', 'ok')
@@ -742,14 +741,28 @@ class App:
                 try:
                     with open(tmp, 'rb') as f:
                         data = f.read()
-                    req = urllib.request.Request(
+
+                    # Try several host addresses where the host clipboard server may be reachable
+                    hosts = [
                         'http://host.docker.internal:9999/copy',
-                        data=data,
-                        headers={'Content-Type': 'image/png'},
-                    )
-                    urllib.request.urlopen(req, timeout=5)
-                    self.log('Imagem copiada para a área de transferência', 'ok')
-                except urllib.error.URLError:
+                        'http://gateway.docker.internal:9999/copy',
+                        'http://172.17.0.1:9999/copy',
+                        'http://localhost:9999/copy',
+                    ]
+                    success = False
+                    for url in hosts:
+                        try:
+                            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'image/png'})
+                            urllib.request.urlopen(req, timeout=5)
+                            success = True
+                            break
+                        except Exception:
+                            continue
+
+                    if success:
+                        self.log('Imagem copiada para a área de transferência', 'ok')
+                        return
+
                     # Servidor não está rodando — salva para download
                     self._img_n = getattr(self, '_img_n', 0) + 1
                     nome = f'grafo_{self._img_n:04d}.png'
@@ -758,7 +771,7 @@ class App:
                         cleanup = False
                     except Exception:
                         pass
-                    self.log('Inicie mac_clip_server.py no Mac', 'warn')
+                    self.log('Inicie clip_server.py no host (macOS/Windows): python clip_server.py', 'warn')
                     self.log(f'Baixe: http://localhost:8080/{nome}', 'info')
                 except Exception as e:
                     self.log(f'Erro ao copiar: {e}', 'err')
@@ -800,81 +813,40 @@ class App:
         threading.Thread(target=_bg, daemon=True).start()
 
     def _copiar_windows(self, surf):
-        largura, altura = surf.get_size()
+        import os as _os, tempfile, subprocess
+        fd, tmp = tempfile.mkstemp(suffix='.png')
+        _os.close(fd)
         try:
-            surf32 = surf.convert_alpha()
-        except Exception:
-            surf32 = surf.copy()
-        rgba = pygame.image.tobytes(surf32, 'RGBA')
-        bgra = bytearray(len(rgba))
-        bgra[0::4] = rgba[2::4]
-        bgra[1::4] = rgba[1::4]
-        bgra[2::4] = rgba[0::4]
-        bgra[3::4] = rgba[3::4]
+            pygame.image.save(surf, tmp)
+        except Exception as e:
+            try:
+                _os.unlink(tmp)
+            except Exception:
+                pass
+            raise RuntimeError(f'Erro ao salvar imagem: {e}')
 
-        class BITMAPINFOHEADER(ctypes.Structure):
-            _fields_ = [
-                ('biSize', ctypes.c_uint32),
-                ('biWidth', ctypes.c_int32),
-                ('biHeight', ctypes.c_int32),
-                ('biPlanes', ctypes.c_uint16),
-                ('biBitCount', ctypes.c_uint16),
-                ('biCompression', ctypes.c_uint32),
-                ('biSizeImage', ctypes.c_uint32),
-                ('biXPelsPerMeter', ctypes.c_int32),
-                ('biYPelsPerMeter', ctypes.c_int32),
-                ('biClrUsed', ctypes.c_uint32),
-                ('biClrImportant', ctypes.c_uint32),
-            ]
-
-        header = BITMAPINFOHEADER()
-        header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        header.biWidth = largura
-        header.biHeight = -altura  # negativo = top-down (ordem do Pygame)
-        header.biPlanes = 1
-        header.biBitCount = 32
-        header.biCompression = 0
-        header.biSizeImage = len(bgra)
-
-        header_size = ctypes.sizeof(header)
-        total_size = header_size + len(bgra)
-
-        GMEM_MOVEABLE = 0x0002
-        kernel32 = ctypes.windll.kernel32
-        user32 = ctypes.windll.user32
-
-        mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, total_size)
-        if not mem:
-            raise RuntimeError('Falha ao alocar memória para clipboard')
-        ptr = kernel32.GlobalLock(mem)
-        if not ptr:
-            kernel32.GlobalFree(mem)
-            raise RuntimeError('Falha ao travar memória para clipboard')
+        # Usa PowerShell + System.Windows.Forms para garantir compatibilidade
+        # com clipboard history (Win+V) e todos os apps no Windows.
+        tmp_ps = tmp.replace('\\', '\\\\')
+        ps = (
+            'Add-Type -AssemblyName System.Windows.Forms; '
+            'Add-Type -AssemblyName System.Drawing; '
+            f'$img = [System.Drawing.Image]::FromFile("{tmp_ps}"); '
+            '[System.Windows.Forms.Clipboard]::SetImage($img); '
+            '$img.Dispose()'
+        )
         try:
-            ctypes.memmove(ptr, ctypes.byref(header), header_size)
-            ctypes.memmove(ptr + header_size, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-NonInteractive', '-Command', ps],
+                capture_output=True, timeout=15, text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or 'PowerShell falhou')
         finally:
-            kernel32.GlobalUnlock(mem)
-
-        CF_DIB = 8
-        opened = False
-        for _ in range(6):
-            if user32.OpenClipboard(None):
-                opened = True
-                break
-            time.sleep(0.05)
-        if not opened:
-            kernel32.GlobalFree(mem)
-            raise RuntimeError('Falha ao abrir a área de transferência')
-        try:
-            user32.EmptyClipboard()
-            if not user32.SetClipboardData(CF_DIB, mem):
-                raise RuntimeError('Falha ao copiar para a área de transferência')
-            mem = None
-        finally:
-            user32.CloseClipboard()
-            if mem:
-                kernel32.GlobalFree(mem)
+            try:
+                _os.unlink(tmp)
+            except Exception:
+                pass
 
     def run(self):
         if len(sys.argv) > 1 and os.path.exists(sys.argv[1]):

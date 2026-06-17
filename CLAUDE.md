@@ -56,7 +56,10 @@ docker run --rm -e DISPLAY=host.docker.internal:0 navgrafo-ufg
 | `algorithms.py` | `dijkstra(grafo, inicio, fim)` → `(caminho, dist, explorados, tempo_ms)` |
 
 ## Clipboard (`copiar_imagem`)
-- **Windows**: CF_DIB via `ctypes.windll`
+
+- **Windows**: salva PNG em arquivo temporário e invoca PowerShell (`System.Windows.Forms.Clipboard::SetImage`) — compatível com Win+V e qualquer app
 - **macOS**: `osascript` com `«class PNGf»`
 - **Linux/Docker**: `xclip -selection clipboard -t image/png`
-- Fallback: salva `grafo_<timestamp>.png` no diretório atual
+- Fallback: salva `grafo_<numero>.png` no diretório atual
+
+> A abordagem anterior no Windows usava `ctypes.windll` (CF_DIB manual via `GlobalAlloc`/`SetClipboardData`), que truncava ponteiros de 64 bits e não registrava os formatos esperados pelo histórico de área de transferência.

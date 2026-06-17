@@ -185,15 +185,25 @@ return caminho, dist[fim], explorados, tempo_ms
 ---
 
 RF08 — Copiar imagem do grafo para clipboard (0.20)
-- Onde: [versao Python/main.py](versao%20Python/main.py)
+
+- Onde: [versao Python/main.py](versao%20Python/main.py) — método `copiar_imagem` e `_copiar_windows`.
 - Como funciona:
-  - `copiar_imagem` obtém `ultimo_grafo_surf` (Surface), converte bytes e usa `ctypes` para `SetClipboardData` no Windows.
-  - Se falhar, salva arquivo PNG via `pygame.image.save` (fallback multiplataforma).
-- Trecho (resumido):
+  1. `copiar_imagem` captura `ultimo_grafo_surf` (Surface Pygame) e detecta o sistema operacional.
+  2. **Windows**: salva a Surface como PNG em arquivo temporário via `pygame.image.save`, depois invoca PowerShell com `System.Windows.Forms.Clipboard::SetImage` — compatível com Win+V e qualquer aplicativo.
+  3. **macOS**: `osascript` com `«class PNGf»`.
+  4. **Linux/Docker**: `xclip -selection clipboard -t image/png`.
+  5. Se qualquer etapa falhar, salva `grafo_<numero>.png` no diretório atual (fallback).
+- Trecho (Windows):
 
 ```python
-rgba = pygame.image.tobytes(surf, 'RGBA')
-# converte e usa ctypes.windll.user32.SetClipboardData
+ps = (
+    'Add-Type -AssemblyName System.Windows.Forms; '
+    'Add-Type -AssemblyName System.Drawing; '
+    f'$img = [System.Drawing.Image]::FromFile("{tmp_ps}"); '
+    '[System.Windows.Forms.Clipboard]::SetImage($img); '
+    '$img.Dispose()'
+)
+subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps], ...)
 ```
 
 ---

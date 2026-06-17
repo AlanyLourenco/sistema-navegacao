@@ -38,7 +38,7 @@ python main.py
 | `N` | Mostrar/ocultar IDs dos vértices |
 | `W` | Mostrar/ocultar pesos das arestas |
 | `L` | Importar mapa (.poly, .txt, .osm, .xml) |
-| `I` | Salvar imagem do mapa (screenshot) |
+| `I` | Copiar imagem do mapa para o clipboard (Windows: PowerShell; Linux: xclip; macOS: osascript) — fallback salva PNG |
 | `Q` | Sair |
 | Scroll do mouse | Zoom in/out |
 | Botão do meio | Pan temporário |
@@ -76,5 +76,5 @@ Suporta grafos com milhares de vértices (Campus UFG: 10.000 V, 11.526 E).
 - RF05: Adição/remoção de vértices e arestas por clique
 - RF06: Arestas dirigidas (mão única) e não-dirigidas (mão dupla)
 - RF07: Tempo, nós explorados, distância total exibidos no painel
-- RF08: Tecla I salva screenshot
+- RF08: Tecla `I` copia imagem para clipboard (ou salva PNG como fallback)
 - RNF01-08: Cores distintas, interface intuitiva, código modular
