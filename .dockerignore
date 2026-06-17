@@ -1,0 +1,10 @@
+.git
+.gitattributes
+.DS_Store
+**/__pycache__
+**/*.pyc
+*.md
+DOCUMENTATION.md
+REQUIREMENTS_MAPPING.md
+SOFTWARE_ENGINEERING.md
+README.md

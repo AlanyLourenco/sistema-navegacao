@@ -1,0 +1,8 @@
+services:
+  navgrafo:
+    build: .
+    image: navgrafo-ufg
+    ports:
+      - "6080:6080"   # noVNC (interface visual)
+      - "8080:8080"   # download de imagens salvas
+    restart: "no"

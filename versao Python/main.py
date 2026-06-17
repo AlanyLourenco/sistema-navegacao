@@ -647,178 +647,234 @@ class App:
         self.log('Seleção limpa', 'warn')
 
     def copiar_imagem(self):
+        src = self.ultimo_grafo_surf
+        if src is None:
+            self.log('Nenhuma imagem disponível para copiar', 'warn')
+            return
+        # Corta os 22 px da statusbar que ficam sobrepostos na tela mas
+        # estão presentes na surface de altura H (area_grafo usa H completo)
+        STATUSBAR_H = 22
+        w, h = src.get_width(), max(1, src.get_height() - STATUSBAR_H)
+        surf = src.subsurface((0, 0, w, h))
+
+        import platform
+        sistema = platform.system()
+        if sistema == 'Darwin':
+            self._copiar_macos(surf)
+            return
+        if sistema != 'Windows':
+            self._copiar_linux(surf)
+            return
+        # Windows: síncrono via ctypes
         try:
-            surf = self.ultimo_grafo_surf
-            if surf is None:
-                self.log('Nenhuma imagem disponível para copiar', 'warn')
-                return
-
-            largura, altura = surf.get_size()
-            # Garantir formato 32-bit com alpha para tobytes ser consistente
-            try:
-                surf32 = surf.convert_alpha()
-            except Exception:
-                surf32 = surf.copy()
-            rgba = pygame.image.tobytes(surf32, 'RGBA')
-            # Converte RGBA->BGRA
-            bgra = bytearray(len(rgba))
-            bgra[0::4] = rgba[2::4]
-            bgra[1::4] = rgba[1::4]
-            bgra[2::4] = rgba[0::4]
-            bgra[3::4] = rgba[3::4]
-
-            # Tentar criar um HBITMAP via CreateDIBSection (melhor compatibilidade)
-            try:
-                gdi32 = ctypes.windll.gdi32
-                user32 = ctypes.windll.user32
-                kernel32 = ctypes.windll.kernel32
-
-                class BITMAPINFOHEADER(ctypes.Structure):
-                    _fields_ = [
-                        ('biSize', ctypes.c_uint32),
-                        ('biWidth', ctypes.c_int32),
-                        ('biHeight', ctypes.c_int32),
-                        ('biPlanes', ctypes.c_uint16),
-                        ('biBitCount', ctypes.c_uint16),
-                        ('biCompression', ctypes.c_uint32),
-                        ('biSizeImage', ctypes.c_uint32),
-                        ('biXPelsPerMeter', ctypes.c_int32),
-                        ('biYPelsPerMeter', ctypes.c_int32),
-                        ('biClrUsed', ctypes.c_uint32),
-                        ('biClrImportant', ctypes.c_uint32),
-                    ]
-
-                header = BITMAPINFOHEADER()
-                header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-                header.biWidth = largura
-                # Use altura positiva e copie linhas invertidas (bottom-up) para DIB
-                header.biHeight = altura
-                header.biPlanes = 1
-                header.biBitCount = 32
-                header.biCompression = 0  # BI_RGB
-                header.biSizeImage = len(bgra)
-                header.biXPelsPerMeter = 0
-                header.biYPelsPerMeter = 0
-                header.biClrUsed = 0
-                header.biClrImportant = 0
-
-                ppvBits = ctypes.c_void_p()
-                # CreateDIBSection(hdc=NULL, pbmi=&header, usage=0, ppvBits, NULL, 0)
-                hbm = gdi32.CreateDIBSection(0, ctypes.byref(header), 0, ctypes.byref(ppvBits), None, 0)
-                if hbm:
-                    # Copiar dados de pixels: DIB bottom-up (linha 0 = última linha)
-                    row_bytes = largura * 4
-                    for y in range(altura):
-                        src_off = (altura - 1 - y) * row_bytes
-                        dest_off = y * row_bytes
-                        dest_ptr = ppvBits.value + dest_off
-                        src_slice = (ctypes.c_ubyte * row_bytes).from_buffer(bgra, src_off)
-                        ctypes.memmove(dest_ptr, src_slice, row_bytes)
-
-                    # Colocar HBITMAP no clipboard como CF_BITMAP (2)
-                    CF_BITMAP = 2
-                    # Abrir clipboard com retries (pode estar ocupado)
-                    opened = False
-                    for _ in range(6):
-                        if user32.OpenClipboard(None):
-                            opened = True
-                            break
-                        time.sleep(0.05)
-                    if not opened:
-                        # Cleanup HBITMAP if we can't open clipboard
-                        gdi32.DeleteObject(hbm)
-                        raise RuntimeError('Falha ao abrir clipboard (CreateDIBSection path)')
-                    try:
-                        user32.EmptyClipboard()
-                        if not user32.SetClipboardData(CF_BITMAP, hbm):
-                            # Se SetClipboardData falhar, liberar HBITMAP
-                            gdi32.DeleteObject(hbm)
-                            raise RuntimeError('Falha ao SetClipboardData(CF_BITMAP)')
-                        # Sucesso: o sistema Windows assume ownership do HBITMAP
-                        hbm = None
-                    finally:
-                        user32.CloseClipboard()
-
-                    self.log('Imagem do grafo copiada para a área de transferência (HBITMAP)', 'ok')
-                    return
-            except Exception:
-                # Se algo falhar no caminho HBITMAP, tentamos DIB diretamente
-                pass
-
-            # Fallback: usar CF_DIB (BITMAPINFOHEADER + pixels em global memory)
-            class BITMAPINFOHEADER2(ctypes.Structure):
-                _fields_ = [
-                    ('biSize', ctypes.c_uint32),
-                    ('biWidth', ctypes.c_int32),
-                    ('biHeight', ctypes.c_int32),
-                    ('biPlanes', ctypes.c_uint16),
-                    ('biBitCount', ctypes.c_uint16),
-                    ('biCompression', ctypes.c_uint32),
-                    ('biSizeImage', ctypes.c_uint32),
-                    ('biXPelsPerMeter', ctypes.c_int32),
-                    ('biYPelsPerMeter', ctypes.c_int32),
-                    ('biClrUsed', ctypes.c_uint32),
-                    ('biClrImportant', ctypes.c_uint32),
-                ]
-
-            header2 = BITMAPINFOHEADER2()
-            header2.biSize = ctypes.sizeof(BITMAPINFOHEADER2)
-            header2.biWidth = largura
-            # altura negativa para indicar top-down (ordem do Pygame)
-            header2.biHeight = -altura
-            header2.biPlanes = 1
-            header2.biBitCount = 32
-            header2.biCompression = 0
-            header2.biSizeImage = len(bgra)
-
-            header_size = ctypes.sizeof(header2)
-            total_size = header_size + len(bgra)
-
-            GMEM_MOVEABLE = 0x0002
-            mem = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE, total_size)
-            if not mem:
-                raise RuntimeError('Falha ao alocar memória para clipboard (DIB fallback)')
-
-            ptr = ctypes.windll.kernel32.GlobalLock(mem)
-            if not ptr:
-                ctypes.windll.kernel32.GlobalFree(mem)
-                raise RuntimeError('Falha ao travar memória para clipboard (DIB fallback)')
-
-            try:
-                ctypes.memmove(ptr, ctypes.byref(header2), header_size)
-                dest = ptr + header_size
-                ctypes.memmove(dest, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
-            finally:
-                ctypes.windll.kernel32.GlobalUnlock(mem)
-
-            CF_DIB = 8
-            # Abrir clipboard com retries
-            opened = False
-            for _ in range(6):
-                if ctypes.windll.user32.OpenClipboard(None):
-                    opened = True
-                    break
-                time.sleep(0.05)
-            if not opened:
-                ctypes.windll.kernel32.GlobalFree(mem)
-                raise RuntimeError('Falha ao abrir a área de transferência (DIB fallback)')
-
-            try:
-                ctypes.windll.user32.EmptyClipboard()
-                if not ctypes.windll.user32.SetClipboardData(CF_DIB, mem):
-                    raise RuntimeError('Falha ao copiar para a área de transferência (DIB fallback)')
-                mem = None
-            finally:
-                ctypes.windll.user32.CloseClipboard()
-
-            self.log('Imagem do grafo copiada para a área de transferência (DIB fallback)', 'ok')
+            self._copiar_windows(surf)
+            self.log('Imagem copiada para a área de transferência', 'ok')
         except Exception as e:
             try:
+                self._img_n = getattr(self, '_img_n', 0) + 1
+                nome = f'grafo_{self._img_n:04d}.png'
+                pygame.image.save(surf, nome)
+                self.log(f'Clipboard falhou; salvo como: {nome}', 'warn')
+            except Exception:
+                self.log(f'Erro ao copiar: {e}', 'err')
+
+    def _copiar_macos(self, surf):
+        import subprocess, tempfile, os as _os, threading
+        fd, tmp = tempfile.mkstemp(suffix='.png')
+        _os.close(fd)
+        # Salva PNG na main thread (acesso à surface deve ser na main thread)
+        try:
+            pygame.image.save(surf, tmp)
+        except Exception as e:
+            try:
+                _os.unlink(tmp)
+            except Exception:
+                pass
+            self.log(f'Erro ao salvar imagem: {e}', 'err')
+            return
+        self.log('Copiando...', 'info')
+
+        def _bg():
+            try:
+                subprocess.run(
+                    ['osascript', '-e', f'set the clipboard to (read (POSIX file "{tmp}") as «class PNGf»)'],
+                    check=True, capture_output=True, timeout=10,
+                )
+                self.log('Imagem copiada para a área de transferência', 'ok')
+            except Exception as e:
                 nome = f'grafo_{int(time.time())}.png'
-                pygame.image.save(self.screen, nome)
-                self.log(f'Clipboard indisponível; salvo em arquivo: {nome}', 'warn')
-            except Exception as fallback_error:
-                self.log(f'Erro ao copiar/salvar: {e} | fallback: {fallback_error}', 'err')
+                try:
+                    import shutil
+                    shutil.copy(tmp, nome)
+                except Exception:
+                    pass
+                self.log(f'Clipboard falhou; salvo como: {nome}', 'warn')
+            finally:
+                try:
+                    _os.unlink(tmp)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _copiar_linux(self, surf):
+        import os as _os, threading, tempfile
+        fd, tmp = tempfile.mkstemp(suffix='.png')
+        _os.close(fd)
+        try:
+            pygame.image.save(surf, tmp)
+        except Exception as e:
+            try:
+                _os.unlink(tmp)
+            except Exception:
+                pass
+            self.log(f'Erro ao salvar imagem: {e}', 'err')
+            return
+
+        if _os.path.exists('/.dockerenv'):
+            # Docker: envia PNG para mac_clip_server.py rodando no host via
+            # host.docker.internal:9999 — ele coloca no clipboard do macOS.
+            self.log('Copiando...', 'info')
+
+            def _bg_docker():
+                import urllib.request, urllib.error
+                cleanup = True
+                try:
+                    with open(tmp, 'rb') as f:
+                        data = f.read()
+                    req = urllib.request.Request(
+                        'http://host.docker.internal:9999/copy',
+                        data=data,
+                        headers={'Content-Type': 'image/png'},
+                    )
+                    urllib.request.urlopen(req, timeout=5)
+                    self.log('Imagem copiada para a área de transferência', 'ok')
+                except urllib.error.URLError:
+                    # Servidor não está rodando — salva para download
+                    self._img_n = getattr(self, '_img_n', 0) + 1
+                    nome = f'grafo_{self._img_n:04d}.png'
+                    try:
+                        _os.rename(tmp, nome)
+                        cleanup = False
+                    except Exception:
+                        pass
+                    self.log('Inicie mac_clip_server.py no Mac', 'warn')
+                    self.log(f'Baixe: http://localhost:8080/{nome}', 'info')
+                except Exception as e:
+                    self.log(f'Erro ao copiar: {e}', 'err')
+                finally:
+                    if cleanup:
+                        try:
+                            _os.unlink(tmp)
+                        except Exception:
+                            pass
+
+            threading.Thread(target=_bg_docker, daemon=True).start()
+            return
+
+        import subprocess
+        self.log('Copiando...', 'info')
+
+        def _bg():
+            try:
+                subprocess.run(
+                    ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', tmp],
+                    check=True, capture_output=True, timeout=10,
+                )
+                self.log('Imagem copiada para a área de transferência', 'ok')
+            except Exception:
+                self._img_n = getattr(self, '_img_n', 0) + 1
+                nome = f'grafo_{self._img_n:04d}.png'
+                try:
+                    import shutil
+                    shutil.copy(tmp, nome)
+                except Exception:
+                    pass
+                self.log(f'Clipboard falhou; salvo como: {nome}', 'warn')
+            finally:
+                try:
+                    _os.unlink(tmp)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _copiar_windows(self, surf):
+        largura, altura = surf.get_size()
+        try:
+            surf32 = surf.convert_alpha()
+        except Exception:
+            surf32 = surf.copy()
+        rgba = pygame.image.tobytes(surf32, 'RGBA')
+        bgra = bytearray(len(rgba))
+        bgra[0::4] = rgba[2::4]
+        bgra[1::4] = rgba[1::4]
+        bgra[2::4] = rgba[0::4]
+        bgra[3::4] = rgba[3::4]
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ('biSize', ctypes.c_uint32),
+                ('biWidth', ctypes.c_int32),
+                ('biHeight', ctypes.c_int32),
+                ('biPlanes', ctypes.c_uint16),
+                ('biBitCount', ctypes.c_uint16),
+                ('biCompression', ctypes.c_uint32),
+                ('biSizeImage', ctypes.c_uint32),
+                ('biXPelsPerMeter', ctypes.c_int32),
+                ('biYPelsPerMeter', ctypes.c_int32),
+                ('biClrUsed', ctypes.c_uint32),
+                ('biClrImportant', ctypes.c_uint32),
+            ]
+
+        header = BITMAPINFOHEADER()
+        header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        header.biWidth = largura
+        header.biHeight = -altura  # negativo = top-down (ordem do Pygame)
+        header.biPlanes = 1
+        header.biBitCount = 32
+        header.biCompression = 0
+        header.biSizeImage = len(bgra)
+
+        header_size = ctypes.sizeof(header)
+        total_size = header_size + len(bgra)
+
+        GMEM_MOVEABLE = 0x0002
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+
+        mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, total_size)
+        if not mem:
+            raise RuntimeError('Falha ao alocar memória para clipboard')
+        ptr = kernel32.GlobalLock(mem)
+        if not ptr:
+            kernel32.GlobalFree(mem)
+            raise RuntimeError('Falha ao travar memória para clipboard')
+        try:
+            ctypes.memmove(ptr, ctypes.byref(header), header_size)
+            ctypes.memmove(ptr + header_size, (ctypes.c_ubyte * len(bgra)).from_buffer(bgra), len(bgra))
+        finally:
+            kernel32.GlobalUnlock(mem)
+
+        CF_DIB = 8
+        opened = False
+        for _ in range(6):
+            if user32.OpenClipboard(None):
+                opened = True
+                break
+            time.sleep(0.05)
+        if not opened:
+            kernel32.GlobalFree(mem)
+            raise RuntimeError('Falha ao abrir a área de transferência')
+        try:
+            user32.EmptyClipboard()
+            if not user32.SetClipboardData(CF_DIB, mem):
+                raise RuntimeError('Falha ao copiar para a área de transferência')
+            mem = None
+        finally:
+            user32.CloseClipboard()
+            if mem:
+                kernel32.GlobalFree(mem)
 
     def run(self):
         if len(sys.argv) > 1 and os.path.exists(sys.argv[1]):
